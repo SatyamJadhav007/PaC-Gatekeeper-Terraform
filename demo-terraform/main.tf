@@ -1,3 +1,10 @@
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  INTENTIONALLY NON-COMPLIANT TERRAFORM                              ║
+# ║  This file contains one deliberate violation per policy category.   ║
+# ║  It exists solely to demonstrate the gatekeeper blocking bad infra. ║
+# ║  DO NOT apply this to any real AWS account.                         ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+
 # ──────────────────────────────────────────────
 # VIOLATION 1: S3 — Public ACL
 # Policy:      policies/s3.rego → deny (public-read ACL)

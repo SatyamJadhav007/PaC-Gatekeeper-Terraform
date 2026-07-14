@@ -50,7 +50,7 @@ jobs:
       # 1. Checkout
       # ────────────────────────────────────
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # ────────────────────────────────────
       # 2. Setup Terraform
@@ -147,7 +147,7 @@ jobs:
       # comment formatter.
       - name: Upload policy results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: policy-results
           path: ${{ env.TF_WORKING_DIR }}/results.json
