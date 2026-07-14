@@ -154,45 +154,20 @@ jobs:
           retention-days: 30
 
       # ────────────────────────────────────
-      # 9. (Phase 4 placeholder) PR Comment
+      # 9. Format and Post PR Comment (Phase 4)
       # ────────────────────────────────────
-      # Phase 4 will add a step here that:
-      #   - Reads results.json
-      #   - Formats a Markdown PR comment
-      #   - Posts/updates it via Octokit
-      # For now, just print a summary.
-      - name: Policy results summary
+      - name: Install script dependencies
         if: always()
-        working-directory: ${{ env.TF_WORKING_DIR }}
-        run: |
-          if [ -f results.json ]; then
-            FAILURES=$(cat results.json | jq '.[0].failures | length')
-            WARNINGS=$(cat results.json | jq '.[0].warnings | length')
-            echo "## 🛡️ Policy Check Summary" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Metric | Count |" >> "$GITHUB_STEP_SUMMARY"
-            echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
-            echo "| ❌ Deny (failures) | ${FAILURES} |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| ⚠️ Warn | ${WARNINGS} |" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
+        working-directory: scripts
+        run: npm install
 
-            if [ "$FAILURES" -gt 0 ]; then
-              echo "### ❌ Denied Violations" >> "$GITHUB_STEP_SUMMARY"
-              echo "" >> "$GITHUB_STEP_SUMMARY"
-              cat results.json | jq -r '.[0].failures[].msg' | while read -r msg; do
-                echo "- ${msg}" >> "$GITHUB_STEP_SUMMARY"
-              done
-              echo "" >> "$GITHUB_STEP_SUMMARY"
-            fi
-
-            if [ "$WARNINGS" -gt 0 ]; then
-              echo "### ⚠️ Warnings" >> "$GITHUB_STEP_SUMMARY"
-              echo "" >> "$GITHUB_STEP_SUMMARY"
-              cat results.json | jq -r '.[0].warnings[].msg' | while read -r msg; do
-                echo "- ${msg}" >> "$GITHUB_STEP_SUMMARY"
-              done
-            fi
-          fi
+      - name: Post PR Comment
+        if: always()
+        working-directory: scripts
+        env:
+          INPUT_RESULTS_PATH: ../${{ env.TF_WORKING_DIR }}/results.json
+          INPUT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node format-comment.js
 
       # ────────────────────────────────────
       # 10. Final gate — fail if any deny
