@@ -1,0 +1,220 @@
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  Policy-as-Code Gatekeeper — CI Workflow                           ║
+# ║  Runs on every PR touching .tf files:                               ║
+# ║    1. Generates a terraform plan                                    ║
+# ║    2. Runs OPA unit tests on policies (fail-fast)                   ║
+# ║    3. Evaluates the plan against Rego policies via Conftest         ║
+# ║    4. Posts results as a PR comment (Phase 4)                       ║
+# ║    5. Blocks merge if any deny rule fires                           ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+
+name: Policy Check
+
+on:
+  pull_request:
+    paths:
+      - "**.tf"
+      - "policies/**"
+      - "policies_test/**"
+      - ".github/workflows/policy-check.yml"
+
+  # Allow manual trigger for testing
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same PR (saves runner minutes)
+concurrency:
+  group: policy-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# ──────────────────────────────────────────────
+# Configuration
+# ──────────────────────────────────────────────
+env:
+  TF_WORKING_DIR: demo-terraform # Directory containing the Terraform config to plan
+  POLICIES_DIR: policies # Directory containing Rego policy files
+  POLICIES_TEST_DIR: policies_test # Directory containing Rego unit tests
+  CONFTEST_VERSION: "0.68.2" # Pin conftest version for reproducibility
+  TF_VAR_region: ap-south-1
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  policy-check:
+    name: "🛡️ Policy Gatekeeper"
+    runs-on: ubuntu-latest
+
+    steps:
+      # ────────────────────────────────────
+      # 1. Checkout
+      # ────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ────────────────────────────────────
+      # 2. Setup Terraform
+      # ────────────────────────────────────
+      # CRITICAL: terraform_wrapper must be false.
+      # The wrapper script added by setup-terraform interferes with
+      # piping `terraform show -json` output — the JSON ends up
+      # malformed with extra stdout decoration.
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      # ────────────────────────────────────
+      # 3. Terraform Init + Plan
+      # ────────────────────────────────────
+      # -backend=false: We don't need a real backend for policy checks.
+      # -input=false:   Never prompt for input in CI.
+      # -out=tfplan:    Save the plan for JSON export.
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -backend=false -input=false
+
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -input=false -out=tfplan
+        env:
+          # AWS credentials from repository secrets.
+          # For the demo-terraform, the provider has skip_credentials_validation,
+          # but a real Terraform config will need valid credentials.
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ env.TF_VAR_region }}
+
+      - name: Terraform Show (JSON plan)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform show -json tfplan > plan.json
+
+      # ────────────────────────────────────
+      # 4. Setup OPA
+      # ────────────────────────────────────
+      - name: Setup OPA
+        uses: open-policy-agent/setup-opa@v2
+
+      # ────────────────────────────────────
+      # 5. Policy Unit Tests (fail-fast)
+      # ────────────────────────────────────
+      # Run the policies' own unit tests BEFORE evaluating a real plan.
+      # If the policies themselves are broken, there's no point in
+      # running conftest — fail fast and save debugging time.
+      - name: Run OPA policy unit tests
+        run: opa test ${{ env.POLICIES_DIR }}/ ${{ env.POLICIES_TEST_DIR }}/ -v
+
+      # ────────────────────────────────────
+      # 6. Install Conftest
+      # ────────────────────────────────────
+      - name: Install Conftest
+        run: |
+          wget -q "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          tar xzf "conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          sudo mv conftest /usr/local/bin/
+          conftest --version
+
+      # ────────────────────────────────────
+      # 7. Evaluate Plan Against Policies
+      # ────────────────────────────────────
+      # Capture JSON output for the Phase 4 comment formatter.
+      # continue-on-error: true — we don't want conftest's exit code
+      # to fail the workflow here. Phase 4's script reads results.json
+      # and makes the pass/fail decision explicitly.
+      - name: Run Conftest policy evaluation
+        id: conftest
+        continue-on-error: true
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          conftest test plan.json \
+            -p ../${{ env.POLICIES_DIR }}/ \
+            --output json > results.json 2>&1
+
+          # Also capture the exit code for the final step
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+          # Print human-readable output to the CI log for quick debugging
+          echo "──── Conftest Results (human-readable) ────"
+          conftest test plan.json \
+            -p ../${{ env.POLICIES_DIR }}/ \
+            --no-color || true
+          echo "────────────────────────────────────────────"
+
+      # ────────────────────────────────────
+      # 8. Upload results as artifact
+      # ────────────────────────────────────
+      # Makes results.json available for download and for Phase 4's
+      # comment formatter.
+      - name: Upload policy results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-results
+          path: ${{ env.TF_WORKING_DIR }}/results.json
+          retention-days: 30
+
+      # ────────────────────────────────────
+      # 9. (Phase 4 placeholder) PR Comment
+      # ────────────────────────────────────
+      # Phase 4 will add a step here that:
+      #   - Reads results.json
+      #   - Formats a Markdown PR comment
+      #   - Posts/updates it via Octokit
+      # For now, just print a summary.
+      - name: Policy results summary
+        if: always()
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          if [ -f results.json ]; then
+            FAILURES=$(cat results.json | jq '.[0].failures | length')
+            WARNINGS=$(cat results.json | jq '.[0].warnings | length')
+            echo "## 🛡️ Policy Check Summary" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Metric | Count |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+            echo "| ❌ Deny (failures) | ${FAILURES} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| ⚠️ Warn | ${WARNINGS} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+
+            if [ "$FAILURES" -gt 0 ]; then
+              echo "### ❌ Denied Violations" >> "$GITHUB_STEP_SUMMARY"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              cat results.json | jq -r '.[0].failures[].msg' | while read -r msg; do
+                echo "- ${msg}" >> "$GITHUB_STEP_SUMMARY"
+              done
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+            fi
+
+            if [ "$WARNINGS" -gt 0 ]; then
+              echo "### ⚠️ Warnings" >> "$GITHUB_STEP_SUMMARY"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              cat results.json | jq -r '.[0].warnings[].msg' | while read -r msg; do
+                echo "- ${msg}" >> "$GITHUB_STEP_SUMMARY"
+              done
+            fi
+          fi
+
+      # ────────────────────────────────────
+      # 10. Final gate — fail if any deny
+      # ────────────────────────────────────
+      # This is the step that actually fails the CI check and blocks
+      # the merge via branch protection. It runs AFTER the PR comment
+      # is posted (Phase 4) so reviewers see the results even when
+      # the check fails.
+      - name: Enforce policy gate
+        if: always()
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          if [ ! -f results.json ]; then
+            echo "❌ results.json not found — conftest may have failed to run"
+            exit 1
+          fi
+
+          FAILURES=$(cat results.json | jq '.[0].failures | length')
+          if [ "$FAILURES" -gt 0 ]; then
+            echo "❌ Policy check FAILED: ${FAILURES} deny violation(s) found."
+            echo "   Merge is blocked until all deny violations are resolved."
+            exit 1
+          fi
+
+          echo "✅ Policy check PASSED: No deny violations."

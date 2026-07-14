@@ -1,0 +1,13 @@
+node_modules
+.env 
+.git  
+package-lock.json
+# Terraform artifacts
+.terraform/
+*.tfplan
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+# Generated plan JSON (for conftest testing)
+demo-terraform/plan.json
+T*.md
