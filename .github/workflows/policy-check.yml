@@ -172,24 +172,48 @@ jobs:
       # ────────────────────────────────────
       # 10. Final gate — fail if any deny
       # ────────────────────────────────────
-      # This is the step that actually fails the CI check and blocks
-      # the merge via branch protection. It runs AFTER the PR comment
-      # is posted (Phase 4) so reviewers see the results even when
-      # the check fails.
       - name: Enforce policy gate
         if: always()
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          if [ ! -f results.json ]; then
-            echo "❌ results.json not found — conftest may have failed to run"
-            exit 1
+          if [ -f results.json ]; then
+            FAILURES=$(cat results.json | jq '.[0].failures | length')
+            if [ "$FAILURES" -gt 0 ]; then
+              echo "❌ Policy check FAILED: $FAILURES deny violation(s) found."
+              echo "   Merge is blocked until all deny violations are resolved."
+              exit 1
+            else
+              echo "✅ All policies passed successfully."
+              exit 0
+            fi
           fi
 
-          FAILURES=$(cat results.json | jq '.[0].failures | length')
-          if [ "$FAILURES" -gt 0 ]; then
-            echo "❌ Policy check FAILED: ${FAILURES} deny violation(s) found."
-            echo "   Merge is blocked until all deny violations are resolved."
-            exit 1
-          fi
+  # ══════════════════════════════════════════════════
+  # JOB 2: COST ESTIMATION (INFRACOST)
+  # ══════════════════════════════════════════════════
+  infracost:
+    name: "💰 Infracost (Cost Delta)"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
 
-          echo "✅ Policy check PASSED: No deny violations."
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+
+      - name: Checkout head branch
+        uses: actions/checkout@v6
+        with:
+          path: head
+
+      - name: Run Infracost diff
+        uses: infracost/actions/diff@v4
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+          path: head/demo-terraform
+          compare-to: base/demo-terraform

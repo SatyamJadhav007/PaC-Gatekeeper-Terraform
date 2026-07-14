@@ -30,6 +30,20 @@ deny contains msg if {
 	)
 }
 
+deny contains msg if {
+	resource := input.resource_changes[_]
+	resource.type == "aws_s3_bucket_acl"
+	is_create_or_update(resource)
+
+	dangerous_acls := {"public-read", "public-read-write"}
+	dangerous_acls[resource.change.after.acl]
+
+	msg := sprintf(
+		"DENY: S3 bucket ACL '%v' is public ('%v'). Remediation: Set the `acl` attribute to 'private' or remove it.",
+		[resource.address, resource.change.after.acl],
+	)
+}
+
 # ──────────────────────────────────────────────
 # DENY: Public access block with any flag disabled
 # ──────────────────────────────────────────────

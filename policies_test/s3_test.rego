@@ -60,6 +60,38 @@ test_allow_s3_private_acl if {
 	}
 }
 
+test_deny_s3_bucket_acl_public_read if {
+	count(deny) > 0 with input as {
+		"resource_changes": [{
+			"address": "aws_s3_bucket_acl.bad",
+			"type": "aws_s3_bucket_acl",
+			"change": {
+				"actions": ["create"],
+				"after": {
+					"bucket": "bad-bucket",
+					"acl": "public-read",
+				},
+			},
+		}],
+	}
+}
+
+test_allow_s3_bucket_acl_private if {
+	count(deny) == 0 with input as {
+		"resource_changes": [{
+			"address": "aws_s3_bucket_acl.good",
+			"type": "aws_s3_bucket_acl",
+			"change": {
+				"actions": ["create"],
+				"after": {
+					"bucket": "good-bucket",
+					"acl": "private",
+				},
+			},
+		}],
+	}
+}
+
 test_allow_s3_no_acl_attribute if {
 	count(deny) == 0 with input as {
 		"resource_changes": [{
