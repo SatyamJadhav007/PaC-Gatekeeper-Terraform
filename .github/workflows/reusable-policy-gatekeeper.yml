@@ -1,0 +1,165 @@
+name: Reusable Policy Gatekeeper
+
+on:
+  workflow_call:
+    inputs:
+      tf_working_dir:
+        description: 'Directory in the caller repo containing the Terraform config'
+        required: false
+        default: '.'
+        type: string
+      aws_region:
+        description: 'AWS Region for Terraform Plan'
+        required: false
+        default: 'ap-south-1'
+        type: string
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      INFRACOST_API_KEY:
+        required: true
+
+env:
+  CONFTEST_VERSION: "0.68.2"
+
+jobs:
+  policy-check:
+    name: "🛡️ Policy Gatekeeper"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      # ────────────────────────────────────
+      # 1. Checkout Caller Repo (Infrastructure)
+      # ────────────────────────────────────
+      - name: Checkout Infrastructure Code
+        uses: actions/checkout@v6
+        with:
+          path: infra-code
+
+      # ────────────────────────────────────
+      # 2. Checkout Gatekeeper Repo (Policies)
+      # ────────────────────────────────────
+      - name: Checkout Gatekeeper Policies
+        uses: actions/checkout@v6
+        with:
+          repository: SatyamJadhav007/PaC-Gatekeeper-Terraform
+          path: gatekeeper
+
+      # ────────────────────────────────────
+      # 3. Setup Terraform
+      # ────────────────────────────────────
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      # ────────────────────────────────────
+      # 4. Terraform Init + Plan
+      # ────────────────────────────────────
+      - name: Terraform Init
+        working-directory: infra-code/${{ inputs.tf_working_dir }}
+        run: terraform init -backend=false -input=false
+
+      - name: Terraform Plan
+        working-directory: infra-code/${{ inputs.tf_working_dir }}
+        run: terraform plan -input=false -out=tfplan
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
+
+      - name: Terraform Show (JSON plan)
+        working-directory: infra-code/${{ inputs.tf_working_dir }}
+        run: terraform show -json tfplan > plan.json
+
+      # ────────────────────────────────────
+      # 5. Install Conftest
+      # ────────────────────────────────────
+      - name: Install Conftest
+        run: |
+          wget -q "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          tar xzf "conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          sudo mv conftest /usr/local/bin/
+
+      # ────────────────────────────────────
+      # 6. Evaluate Plan Against Policies
+      # ────────────────────────────────────
+      - name: Run Conftest policy evaluation
+        id: conftest
+        continue-on-error: true
+        working-directory: infra-code/${{ inputs.tf_working_dir }}
+        run: |
+          conftest test plan.json \
+            -p ../../gatekeeper/policies/ \
+            --output json > results.json 2>&1
+
+          echo "──── Conftest Results ────"
+          conftest test plan.json -p ../../gatekeeper/policies/ --no-color || true
+
+      # ────────────────────────────────────
+      # 7. Post PR Comment
+      # ────────────────────────────────────
+      - name: Install script dependencies
+        if: always()
+        working-directory: gatekeeper/scripts
+        run: npm install
+
+      - name: Post PR Comment
+        if: always()
+        working-directory: gatekeeper/scripts
+        env:
+          INPUT_RESULTS_PATH: ../../infra-code/${{ inputs.tf_working_dir }}/results.json
+          INPUT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node format-comment.js
+
+      # ────────────────────────────────────
+      # 8. Final Gate
+      # ────────────────────────────────────
+      - name: Enforce policy gate
+        if: always()
+        working-directory: infra-code/${{ inputs.tf_working_dir }}
+        run: |
+          if [ -f results.json ]; then
+            FAILURES=$(cat results.json | jq '.[0].failures | length')
+            if [ "$FAILURES" -gt 0 ]; then
+              echo "❌ Policy check FAILED: $FAILURES deny violation(s) found."
+              exit 1
+            else
+              echo "✅ All policies passed successfully."
+              exit 0
+            fi
+          fi
+
+  # ══════════════════════════════════════════════════
+  # JOB 2: COST ESTIMATION (INFRACOST)
+  # ══════════════════════════════════════════════════
+  infracost:
+    name: "💰 Infracost (Cost Delta)"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+
+      - name: Checkout head branch
+        uses: actions/checkout@v6
+        with:
+          path: head
+
+      - name: Run Infracost diff
+        uses: infracost/actions/diff@v4
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+          head-path: head/${{ inputs.tf_working_dir }}
+          base-path: base/${{ inputs.tf_working_dir }}
