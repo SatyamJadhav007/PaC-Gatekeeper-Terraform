@@ -66,9 +66,11 @@ jobs:
       # ────────────────────────────────────
       - name: Inject TF Vars
         working-directory: infra-code/${{ inputs.tf_working_dir }}
+        env:
+          TF_VARS_CONTENT: ${{ secrets.TF_VARS_FILE }}
         run: |
-          if [ -n "${{ secrets.TF_VARS_FILE }}" ]; then
-            echo "${{ secrets.TF_VARS_FILE }}" > ci.auto.tfvars
+          if [ -n "$TF_VARS_CONTENT" ]; then
+            echo "$TF_VARS_CONTENT" > ci.auto.tfvars
             echo "✅ Created ci.auto.tfvars from secret"
           fi
 
