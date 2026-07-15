@@ -66,12 +66,18 @@ jobs:
       # ────────────────────────────────────
       - name: Inject TF Vars
         working-directory: infra-code/${{ inputs.tf_working_dir }}
+        env:
+          TF_VARS_CONTENT: ${{ secrets.TF_VARS_FILE }}
         run: |
-          if [ -n "${{ secrets.TF_VARS_FILE }}" ]; then
-            cat << 'EOF' > ci.auto.tfvars
-          ${{ secrets.TF_VARS_FILE }}
-          EOF
-            echo "✅ Created ci.auto.tfvars from secret"
+          # Delete any existing auto.tfvars that might be conflicting from the repo
+          rm -f *.auto.tfvars terraform.tfvars
+          
+          if [ -n "$TF_VARS_CONTENT" ]; then
+            echo "$TF_VARS_CONTENT" > ci.auto.tfvars
+            echo "✅ Created ci.auto.tfvars from secret:"
+            cat ci.auto.tfvars
+          else
+            echo "⚠️ TF_VARS_FILE secret is empty or not passed."
           fi
 
       # ────────────────────────────────────
