@@ -20,6 +20,9 @@ on:
         required: true
       INFRACOST_API_KEY:
         required: true
+      TF_VARS_FILE:
+        description: 'Contents of a tfvars file containing required variables (secrets, image tags, etc.)'
+        required: false
 
 env:
   CONFTEST_VERSION: "0.68.2"
@@ -57,6 +60,17 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
+          
+      # ────────────────────────────────────
+      # 3.5. Inject Required Variables
+      # ────────────────────────────────────
+      - name: Inject TF Vars
+        working-directory: infra-code/${{ inputs.tf_working_dir }}
+        run: |
+          if [ -n "${{ secrets.TF_VARS_FILE }}" ]; then
+            echo "${{ secrets.TF_VARS_FILE }}" > ci.auto.tfvars
+            echo "✅ Created ci.auto.tfvars from secret"
+          fi
 
       # ────────────────────────────────────
       # 4. Terraform Init + Plan
