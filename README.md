@@ -93,7 +93,7 @@ _Below is the Gatekeeper successfully blocking an external repository's non-comp
 
 ### Cost Visibility Integration
 
-![Infracost Comment](docs/images/infracost.png)
+![Infracost Comment](docs/images/Infracost.png)
 
 ### Hard Enforcement (Blocked Merge)
 
