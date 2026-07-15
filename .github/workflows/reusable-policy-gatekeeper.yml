@@ -63,7 +63,11 @@ jobs:
       # ────────────────────────────────────
       - name: Terraform Init
         working-directory: infra-code/${{ inputs.tf_working_dir }}
-        run: terraform init -backend=false -input=false
+        run: terraform init -input=false
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
 
       - name: Terraform Plan
         working-directory: infra-code/${{ inputs.tf_working_dir }}
