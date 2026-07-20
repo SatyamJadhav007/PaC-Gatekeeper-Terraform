@@ -91,29 +91,23 @@ jobs:
         id: plan
         working-directory: ${{ inputs.tf_working_dir }}
         run: |
-          EXIT_CODE=0
-          terraform plan -detailed-exitcode -input=false -no-color > plan_output.txt 2>&1 || EXIT_CODE=$?
+          # Run terraform plan and save output. We use || true so the script never exits here.
+          terraform plan -detailed-exitcode -input=false -no-color > plan_output.txt 2>&1 || true
           cat plan_output.txt
           
-          # Native Bash string matching fallback (immune to grep quirks)
-          PLAN_CONTENT=$(cat plan_output.txt)
-          if [[ "$PLAN_CONTENT" == *"Your infrastructure matches the configuration."* ]]; then
-            EXIT_CODE=0
-          elif [[ "$PLAN_CONTENT" == *"Plan:"* ]]; then
-            EXIT_CODE=2
-          fi
-
-          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
-
-          if [ $EXIT_CODE -eq 0 ]; then
-            echo "drift_detected=false" >> $GITHUB_OUTPUT
-            echo "✅ No drift detected. Infrastructure matches code."
-          elif [ $EXIT_CODE -eq 2 ]; then
+          # Check for drift using grep directly on the output file
+          if grep -q -i "Plan: [0-9]" plan_output.txt || grep -q "to add, .* to change" plan_output.txt; then
+            echo "exit_code=2" >> $GITHUB_OUTPUT
             echo "drift_detected=true" >> $GITHUB_OUTPUT
             echo "⚠️ DRIFT DETECTED! Infrastructure has diverged from code."
+          elif grep -q -i "No changes" plan_output.txt || grep -q "matches the configuration" plan_output.txt; then
+            echo "exit_code=0" >> $GITHUB_OUTPUT
+            echo "drift_detected=false" >> $GITHUB_OUTPUT
+            echo "✅ No drift detected. Infrastructure matches code."
           else
+            echo "exit_code=1" >> $GITHUB_OUTPUT
             echo "drift_detected=error" >> $GITHUB_OUTPUT
-            echo "❌ Terraform plan failed with exit code $EXIT_CODE"
+            echo "❌ Terraform plan failed or unrecognized output."
             exit 1
           fi
         env:
