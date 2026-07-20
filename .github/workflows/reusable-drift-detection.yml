@@ -99,15 +99,15 @@ jobs:
           if grep -q -i "Plan: [0-9]" plan_output.txt || grep -q "to add, .* to change" plan_output.txt; then
             echo "exit_code=2" >> $GITHUB_OUTPUT
             echo "drift_detected=true" >> $GITHUB_OUTPUT
-            echo "⚠️ DRIFT DETECTED! Infrastructure has diverged from code."
+            echo "⚠️ [V2] DRIFT DETECTED! Infrastructure has diverged from code."
           elif grep -q -i "No changes" plan_output.txt || grep -q "matches the configuration" plan_output.txt; then
             echo "exit_code=0" >> $GITHUB_OUTPUT
             echo "drift_detected=false" >> $GITHUB_OUTPUT
-            echo "✅ No drift detected. Infrastructure matches code."
+            echo "✅ [V2] No drift detected. Infrastructure matches code."
           else
             echo "exit_code=1" >> $GITHUB_OUTPUT
             echo "drift_detected=error" >> $GITHUB_OUTPUT
-            echo "❌ Terraform plan failed or unrecognized output."
+            echo "❌ [V2] Terraform plan failed or unrecognized output."
             exit 1
           fi
         env:
