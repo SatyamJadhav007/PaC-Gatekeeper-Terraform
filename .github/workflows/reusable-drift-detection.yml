@@ -95,10 +95,11 @@ jobs:
           terraform plan -detailed-exitcode -input=false -no-color > plan_output.txt 2>&1 || EXIT_CODE=$?
           cat plan_output.txt
           
-          # Foolproof fallback: if the runner swallows the exit code, we parse the text
-          if grep -q "Your infrastructure matches the configuration." plan_output.txt; then
+          # Native Bash string matching fallback (immune to grep quirks)
+          PLAN_CONTENT=$(cat plan_output.txt)
+          if [[ "$PLAN_CONTENT" == *"Your infrastructure matches the configuration."* ]]; then
             EXIT_CODE=0
-          elif grep -q "Plan: " plan_output.txt; then
+          elif [[ "$PLAN_CONTENT" == *"Plan:"* ]]; then
             EXIT_CODE=2
           fi
 
