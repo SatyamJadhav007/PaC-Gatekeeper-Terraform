@@ -92,8 +92,10 @@ jobs:
         working-directory: ${{ inputs.tf_working_dir }}
         run: |
           set +e
-          terraform plan -detailed-exitcode -input=false -no-color 2>&1 | tee plan_output.txt
-          EXIT_CODE=${PIPESTATUS[0]}
+          terraform plan -detailed-exitcode -input=false -no-color > plan_output.txt 2>&1
+          EXIT_CODE=$?
+          cat plan_output.txt
+          
           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
 
           if [ $EXIT_CODE -eq 0 ]; then
