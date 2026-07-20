@@ -1,7 +1,7 @@
 # PaC-Gatekeeper-Terraform
 
 **PaC-Gatekeeper-Terraform** is a centralized **Policy as Code (PaC)** platform designed to deeply enforce **Cloud Security**, **FinOps governance**, and **Compliance** across distributed AWS infrastructure, built to understand how **Open Policy Agent (OPA/Rego)**, **Terraform**, **Infracost**, and **GitHub Actions** work together in a production-style ecosystem.
-The project emphasizes **shift-left security**, **automated cost visibility**, **centralized governance**, and **developer-friendly UX**, while maintaining a clean, modular architecture. Beyond the policy layer, the Gatekeeper is fully automated via a **Reusable GitHub Actions Workflow**, provisioning a highly intelligent **Node.js + Octokit Bot** to format and inject compliance results directly into Pull Requests. This architecture enables seamless, organization-wide policy enforcement-blocking non-compliant merges at the CI level while delivering contextual remediation steps to developers in real-time.
+The project emphasizes **shift-left security**, **automated cost visibility**, **continuous drift detection**, **centralized governance**, and **developer-friendly UX**, while maintaining a clean, modular architecture. Beyond the policy layer, the Gatekeeper is fully automated via **Reusable GitHub Actions Workflows**, provisioning a highly intelligent **Node.js + Octokit Bot** to format and inject compliance results directly into Pull Requests and track infrastructure drift via automated GitHub Issues. This architecture enables seamless, organization-wide policy enforcement—blocking non-compliant merges at the CI level while delivering contextual remediation steps to developers in real-time, and ensuring live AWS environments never diverge from committed code.
 
 ---
 
@@ -10,7 +10,7 @@ The project emphasizes **shift-left security**, **automated cost visibility**, *
 - 🛡️ **Centralized Policy as Code (OPA/Rego)**
   - Enforces FinOps (EC2 sizing, tagging) and Security (Encryption, IAM wildcard blocking) rules.
   - Written in **Rego** and evaluated against Terraform JSON plans using **Conftest**.
-  - **60/60 passing unit tests** ensuring 98.5% policy coverage before execution.
+  - **62/62 passing unit tests** ensuring 98.5% policy coverage before execution.
 
 - 💰 **Automated Cost Estimation (Infracost)**
   - Calculates the exact cost delta (increase/decrease) of proposed infrastructure changes.
@@ -57,22 +57,22 @@ The project emphasizes **shift-left security**, **automated cost visibility**, *
 graph TD
     Dev[Developer] -->|Opens PR| CallerRepo(External Application Repo)
     CallerRepo -->|Triggers| ReusableWF{Reusable Gatekeeper Workflow}
-    
+
     subgraph CI ["Centralized GitHub Actions (PR-Triggered)"]
         ReusableWF -->|Checkout Code| TFPlan(Terraform Plan)
-        
+
         TFPlan -->|Generate JSON| OPA[OPA / Conftest]
         TFPlan -->|Generate JSON| Infracost[Infracost API]
-        
+
         OPA -->|Evaluate Rego Policies| Results{Compliance Status}
         Infracost -->|Calculate Diff| Cost[Cost Delta]
-        
+
         Results -->|Deny Violations| Block[Branch Protection: Block Merge]
         Results -->|Raw JSON| Bot[Node.js Octokit Bot]
-        
+
         Cost --> Bot
     end
-    
+
     Bot -->|Post Formatted Comment| PR(GitHub Pull Request)
     Block -.->|Requires Changes| Dev
 
@@ -112,9 +112,20 @@ _Below is the Gatekeeper successfully blocking an external repository's non-comp
 
 ![Infracost Comment](docs/images/Infracost.png)
 
-### Hard Enforcement (Blocked Merge)
+### 3. Branch Protection: Failed Check
 
 ![Blocked Merge](docs/images/merge-block.png)
+_(Branch protection ensures developers cannot bypass failing OPA policies)._
+
+### 4. Automated Drift Detection
+
+**Step 1: Unauthorized Cloud Modification**
+![Manual Cloud Change](docs/images/cloud-change-proof.png)
+_(A manual, untracked change is made directly in the AWS Console—in this case, an unauthorized tag added to an EC2 instance)._
+
+**Step 2: Automated Detection & Alerting**
+![Drift Detection](docs/images/drift-issue.png)
+_(A scheduled cron job detects when the live AWS environment diverges from the Terraform code and automatically opens a GitHub Issue with resource-level details)._
 
 ---
 

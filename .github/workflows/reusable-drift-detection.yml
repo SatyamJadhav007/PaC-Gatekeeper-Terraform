@@ -4,14 +4,14 @@ on:
   workflow_call:
     inputs:
       tf_working_dir:
-        description: 'Directory in the caller repo containing the Terraform config'
+        description: "Directory in the caller repo containing the Terraform config"
         required: false
-        default: '.'
+        default: "."
         type: string
       aws_region:
-        description: 'AWS Region for Terraform Plan'
+        description: "AWS Region for Terraform Plan"
         required: false
-        default: 'ap-south-1'
+        default: "ap-south-1"
         type: string
     secrets:
       AWS_ACCESS_KEY_ID:
@@ -19,7 +19,7 @@ on:
       AWS_SECRET_ACCESS_KEY:
         required: true
       TF_VARS_FILE:
-        description: 'Contents of a tfvars file containing required variables'
+        description: "Contents of a tfvars file containing required variables"
         required: false
 
 jobs:
@@ -85,7 +85,7 @@ jobs:
       #    Exit codes:
       #      0 = No changes (no drift)
       #      1 = Error
-      #      2 = Changes detected (DRIFT!)
+      #      2 = Changes detected
       # ────────────────────────────────────
       - name: Terraform Plan (Detect Drift)
         id: plan
@@ -94,7 +94,7 @@ jobs:
           # Run terraform plan and save output. We use || true so the script never exits here.
           terraform plan -detailed-exitcode -input=false -no-color > plan_output.txt 2>&1 || true
           cat plan_output.txt
-          
+
           # Check for drift using grep directly on the output file
           if grep -q -i "Plan: [0-9]" plan_output.txt || grep -q "to add, .* to change" plan_output.txt; then
             echo "exit_code=2" >> $GITHUB_OUTPUT
