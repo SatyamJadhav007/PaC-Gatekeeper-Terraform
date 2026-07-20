@@ -36,6 +36,12 @@ The project emphasizes **shift-left security**, **automated cost visibility**, *
   - Physically disables the "Merge pull request" button if any `Deny` violations are detected.
   - Fails open on warnings to allow best-practice recommendations without blocking deployments.
 
+- 🔍 **Automated Drift Detection**
+  - Scheduled cron workflow runs `terraform plan -detailed-exitcode` against the `main` branch daily.
+  - Detects when live AWS infrastructure diverges from the committed Terraform code (exit code 2 = drift).
+  - Automatically creates a GitHub Issue with resource-level drift details, remediation steps, and a collapsible raw plan output.
+  - Auto-closes the issue when drift is resolved on the next scan.
+
 - ⚡ **Modern Tech Stack**
   - **Infrastructure as Code:** Terraform, HCL
   - **Policy Engine:** Open Policy Agent (OPA), Rego, Conftest
@@ -52,7 +58,7 @@ graph TD
     Dev[Developer] -->|Opens PR| CallerRepo(External Application Repo)
     CallerRepo -->|Triggers| ReusableWF{Reusable Gatekeeper Workflow}
     
-    subgraph CI [Centralized GitHub Actions]
+    subgraph CI ["Centralized GitHub Actions (PR-Triggered)"]
         ReusableWF -->|Checkout Code| TFPlan(Terraform Plan)
         
         TFPlan -->|Generate JSON| OPA[OPA / Conftest]
@@ -69,6 +75,15 @@ graph TD
     
     Bot -->|Post Formatted Comment| PR(GitHub Pull Request)
     Block -.->|Requires Changes| Dev
+
+    subgraph Drift ["Drift Detection (Cron-Scheduled)"]
+        Cron[Daily Cron Schedule] -->|Runs on main| DriftPlan["terraform plan -detailed-exitcode"]
+        DriftPlan -->|Exit Code 2| DriftBot[Drift Issue Formatter]
+        DriftPlan -->|Exit Code 0| AutoClose[Auto-Close Issue]
+    end
+
+    DriftBot -->|Create / Update| Issue(GitHub Issue)
+    AutoClose -.->|Close with Resolution| Issue
 ```
 
 - **Open Policy Agent (OPA/Rego)** handles the static analysis of the Terraform Plan JSON.
@@ -77,8 +92,10 @@ graph TD
   - Checking out cross-repository code (Infrastructure + Policies).
   - Setting up Terraform and initializing remote S3 backends.
   - Parallelizing the execution of Policy Checks and Cost Estimation.
+  - Scheduling daily drift detection scans against the `main` branch.
 - **Node.js (Octokit)** is used as a formatting layer to parse raw JSON violation data into developer-friendly markdown and push it to the GitHub API.
 - **Infracost** serves as the FinOps engine to fetch real-time AWS pricing data and calculate monthly cost differences based on the Terraform plan.
+- **Drift Detection** uses `terraform plan -detailed-exitcode` to compare live AWS state against committed code. Exit code 2 signals drift, triggering automated GitHub Issue creation with resource-level details.
 - **GitHub Branch Protection Rules** serve as the final physical barrier, ensuring code cannot reach the `main` branch unless it satisfies the Central Gatekeeper's conditions.
 
 ---
@@ -175,6 +192,7 @@ The primary goal of **PaC-Gatekeeper-Terraform** is to **deeply understand and i
 - Injecting FinOps (Cost Estimation) directly into the developer workflow.
 - Architecting Reusable GitHub Actions for organization-wide deployment.
 - Creating a seamless, non-intrusive Developer Experience (DX) via custom GitHub bots.
+- Detecting **infrastructure drift** between live cloud state and committed Terraform code via scheduled scans.
 
 While the repository contains synthetic Terraform for demonstration, its core strength lies in its **production-ready, plug-and-play architecture** capable of securing real-world deployments.
 
@@ -182,9 +200,9 @@ While the repository contains synthetic Terraform for demonstration, its core st
 
 ## 📌 Status
 
-✅ **Completed / Developed** — The core policy engine, bot, and reusable workflow are fully implemented and verified against real production code.
+✅ **Completed / Developed** — The core policy engine, bot, drift detection, and reusable workflows are fully implemented and verified against real production code.
 
-The project remains **open for future improvements**, particularly around adding advanced **drift detection** policies, integrating **Checkov/Trivy** for out-of-the-box vulnerability scanning alongside custom Rego rules, and deploying automated Slack alerts for blocked high-risk deployments.
+The project remains **open for future improvements**, particularly around integrating **Checkov/Trivy** for out-of-the-box vulnerability scanning alongside custom Rego rules, and deploying automated Slack alerts for blocked high-risk deployments.
 
 ---
 

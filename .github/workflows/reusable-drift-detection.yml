@@ -1,0 +1,145 @@
+name: Reusable Drift Detection
+
+on:
+  workflow_call:
+    inputs:
+      tf_working_dir:
+        description: 'Directory in the caller repo containing the Terraform config'
+        required: false
+        default: '.'
+        type: string
+      aws_region:
+        description: 'AWS Region for Terraform Plan'
+        required: false
+        default: 'ap-south-1'
+        type: string
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      TF_VARS_FILE:
+        description: 'Contents of a tfvars file containing required variables'
+        required: false
+
+jobs:
+  drift-check:
+    name: "🔍 Drift Detection"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      # ────────────────────────────────────
+      # 1. Checkout Caller Repo (Infrastructure)
+      # ────────────────────────────────────
+      - name: Checkout Infrastructure Code
+        uses: actions/checkout@v6
+
+      # ────────────────────────────────────
+      # 2. Checkout Gatekeeper Repo (Scripts)
+      # ────────────────────────────────────
+      - name: Checkout Gatekeeper Scripts
+        uses: actions/checkout@v6
+        with:
+          repository: SatyamJadhav007/PaC-Gatekeeper-Terraform
+          path: gatekeeper
+
+      # ────────────────────────────────────
+      # 3. Setup Terraform
+      # ────────────────────────────────────
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      # ────────────────────────────────────
+      # 4. Inject Required Variables
+      # ────────────────────────────────────
+      - name: Inject TF Vars
+        working-directory: ${{ inputs.tf_working_dir }}
+        env:
+          TF_VARS_CONTENT: ${{ secrets.TF_VARS_FILE }}
+        run: |
+          rm -f *.auto.tfvars terraform.tfvars
+
+          if [ -n "$TF_VARS_CONTENT" ]; then
+            echo "$TF_VARS_CONTENT" > ci.auto.tfvars
+            echo "✅ Injected ci.auto.tfvars from secret"
+          fi
+
+      # ────────────────────────────────────
+      # 5. Terraform Init
+      # ────────────────────────────────────
+      - name: Terraform Init
+        working-directory: ${{ inputs.tf_working_dir }}
+        run: terraform init -input=false
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
+
+      # ────────────────────────────────────
+      # 6. Terraform Plan (Drift Check)
+      #    Exit codes:
+      #      0 = No changes (no drift)
+      #      1 = Error
+      #      2 = Changes detected (DRIFT!)
+      # ────────────────────────────────────
+      - name: Terraform Plan (Detect Drift)
+        id: plan
+        working-directory: ${{ inputs.tf_working_dir }}
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -input=false -no-color 2>&1 | tee plan_output.txt
+          EXIT_CODE=$?
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "drift_detected=false" >> $GITHUB_OUTPUT
+            echo "✅ No drift detected. Infrastructure matches code."
+          elif [ $EXIT_CODE -eq 2 ]; then
+            echo "drift_detected=true" >> $GITHUB_OUTPUT
+            echo "⚠️ DRIFT DETECTED! Infrastructure has diverged from code."
+          else
+            echo "drift_detected=error" >> $GITHUB_OUTPUT
+            echo "❌ Terraform plan failed with exit code $EXIT_CODE"
+            exit 1
+          fi
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
+
+      # ────────────────────────────────────
+      # 7. Install Script Dependencies
+      # ────────────────────────────────────
+      - name: Install script dependencies
+        if: steps.plan.outputs.drift_detected == 'true' || steps.plan.outputs.drift_detected == 'false'
+        working-directory: gatekeeper/scripts
+        run: npm install
+
+      # ────────────────────────────────────
+      # 8. Create/Update Drift Issue (if drift detected)
+      # ────────────────────────────────────
+      - name: Create or Update Drift Issue
+        if: steps.plan.outputs.drift_detected == 'true'
+        working-directory: gatekeeper/scripts
+        env:
+          DRIFT_OUTPUT_PATH: ${{ github.workspace }}/${{ inputs.tf_working_dir }}/plan_output.txt
+          INPUT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRIFT_STATUS: "true"
+          DRIFT_REPO_NAME: ${{ github.repository }}
+        run: node format-drift-issue.js
+
+      # ────────────────────────────────────
+      # 9. Auto-Close Drift Issue (if no drift)
+      # ────────────────────────────────────
+      - name: Close Drift Issue (resolved)
+        if: steps.plan.outputs.drift_detected == 'false'
+        working-directory: gatekeeper/scripts
+        env:
+          INPUT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRIFT_STATUS: "resolved"
+        run: node format-drift-issue.js
